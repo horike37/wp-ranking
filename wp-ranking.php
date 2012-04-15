@@ -10,10 +10,15 @@ Domain Path: /languages
 Text Domain: wp-ranking
 */
 
-new WPRanking();
+require_once(dirname(__FILE__).'/includes/admin.class.php');
+require_once(dirname(__FILE__).'/includes/admin.class.php');
+
+$wpranking = new WPRanking();
 
 class WPRanking {
 
+private $query_expire = 3600; // seconds
+private $count_timer = 4000; // msec
 private $counter;
 private $table = 'ranking_table';
 private $nonce = 'wp-ranking';
@@ -44,9 +49,11 @@ public function wp_footer()
     if (is_user_logged_in() || !is_singular()) {
         return;
     }
+    global $blog_id;
     $src = admin_url(sprintf(
-        'admin-ajax.php?action=%s&id=%d',
+        'admin-ajax.php?action=%s&blog_id=%d&post_id=%s',
         $this->loader,
+        $blog_id,
         get_the_ID()
     ));
     printf(
@@ -60,13 +67,15 @@ public function counter()
     nocache_headers();
     header('Content-Type: application/json; charset=utf-8');
     if (wp_verify_nonce($_GET['nonce'], $this->nonce) && !is_user_logged_in()) {
-        if (isset($_GET['id']) && intval($_GET['id'])) {
+        if (isset($_GET['blog_id']) && intval($_GET['blog_id']) &&
+                    isset($_GET['post_id']) && intval($_GET['post_id'])) {
             if (isset($_COOKIE[$this->cookie]) && $_COOKIE[$this->cookie]) {
                 global $wpdb;
-                $sql = "REPLACE INTO `{$this->table}` VALUES(%s, %s, %s)";
+                $sql = "REPLACE INTO `{$this->table}` VALUES(%d, %d, %s, %d)";
                 $sql = $wpdb->prepare(
                     $sql,
-                    $_GET['id'],
+                    $_GET['blog_id'],
+                    $_GET['post_id'],
                     $_COOKIE[$this->cookie],
                     time()
                 );
@@ -84,7 +93,6 @@ public function counter()
 public function loader()
 {
     if (!is_user_logged_in()) {
-        nocache_headers();
         header('Content-type: text/javascript');
         if (!isset($_COOKIE[$this->cookie]) || !$_COOKIE[$this->cookie]) {
             $id = md5(uniqid(rand(),1));
@@ -95,12 +103,14 @@ public function loader()
             );
         }
         $src = admin_url('admin-ajax.php');
-        $src = add_query_arg('id', intval($_GET['id']), $src);
+        $src = add_query_arg('blog_id', intval($_GET['blog_id']), $src);
+        $src = add_query_arg('post_id', intval($_GET['post_id']), $src);
         $src = add_query_arg('action', $this->action, $src);
         $src = add_query_arg('nonce', wp_create_nonce($this->nonce), $src);
         echo sprintf(
             file_get_contents(dirname(__FILE__).'/js/loader.js'),
-            $src
+            $src,
+            $this->count_timer
         );
     }
     exit;
@@ -111,16 +121,44 @@ public function activation()
     global $wpdb;
     if ($wpdb->get_var("show tables like '$this->table'") != $this->table) {
         $sql = "CREATE TABLE `{$this->table}` (
-            `id` bigint(20) unsigned not null,
+            `blog_id` bigint(20) unsigned not null,
+            `post_id` bigint(20) unsigned not null,
             `session` varchar(32) not null,
             `datetime` bigint(20) not null,
-            primary key (`id`, `session`),
+            primary key (`blog_id`, `post_id`, `session`),
             key `session` (`session`),
             key `datetime`(`datetime`)
             );";
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
     }
+}
+
+public function get_ranking($start, $end, $rows)
+{
+    global $wpdb;
+    global $blog_id;
+
+    $sql = "select `post_id`, count(*) from `{$this->table}`";
+    $sql .= " where `blog_id`=%d and `datetime`>%d and `datetime`<%d";
+    $sql .= " group by `post_id`";
+    $sql .= " order by count(*) desc";
+    $sql .= " limit 0,%d";
+    $sql = $wpdb->prepare(
+        $sql,
+        $blog_id,
+        $start,
+        $end,
+        $rows
+    );
+    $key = md5($sql);
+    $data = get_transient($key);
+    if (!$data) {
+        $data = $wpdb->query($sql, ARRAY_A);
+        set_transient($key, $data, $this->query_expire);
+    }
+
+    return $data;
 }
 
 } // end WPRanking()
