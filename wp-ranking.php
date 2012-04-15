@@ -11,7 +11,6 @@ Text Domain: wp-ranking
 */
 
 require_once(dirname(__FILE__).'/includes/admin.class.php');
-require_once(dirname(__FILE__).'/includes/admin.class.php');
 
 $wpranking = new WPRanking();
 
