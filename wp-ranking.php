@@ -2,12 +2,12 @@
 /*
 Plugin Name: WP Ranking
 Author: Takayuki Miyauchi
-Plugin URI: http://firegoby.jp/wp/wp-ranking
+Plugin URI: http://firegoby.jp/wp/wp_ranking
 Description: WP Ranking Multisite Compatible.
 Version: 0.5.1
 Author URI: http://firegoby.jp/
 Domain Path: /languages
-Text Domain: wp-ranking
+Text Domain: wp_ranking
 */
 
 require_once(dirname(__FILE__).'/includes/admin.class.php');
@@ -16,15 +16,15 @@ $wpranking = new WPRanking();
 
 class WPRanking {
 
-private $query_expire = 3600; // seconds
+private $cache_expire = 3600; // seconds
 private $count_timer  = 4000; // msec
 private $counter;
 private $table   = 'ranking_table';
-private $nonce   = 'wp-ranking';
-private $action  = 'wp-ranking-counter';
-private $loader  = 'wp-ranking-loader';
-private $cookie  = 'wp-ranking';
-private $dataset = array();
+private $nonce   = 'wp_ranking';
+private $action  = 'wp_ranking_counter';
+private $loader  = 'wp_ranking_loader';
+private $cookie  = 'wp_ranking';
+private $query_set = array();
 
 function __construct()
 {
@@ -35,6 +35,7 @@ function __construct()
     add_action('wp_ajax_nopriv_'.$this->loader, array(&$this, 'loader'));
     add_action('wp_head', array(&$this, 'wp_head'));
     add_action('wp_footer', array(&$this, 'wp_footer'));
+    add_shortcode('wp_ranking' , array(&$this, 'shortcode'));
 }
 
 public function wp_head()
@@ -110,7 +111,10 @@ public function loader()
         echo sprintf(
             file_get_contents(dirname(__FILE__).'/js/loader.js'),
             $src,
-            $this->count_timer
+            apply_filters(
+                'wp_ranking_count_timer',
+                $this->count_timer
+            )
         );
     }
     exit;
@@ -129,18 +133,65 @@ public function activation()
             key `session` (`session`),
             key `datetime`(`datetime`)
             );";
-        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        require_once(ABSPATH.'wp-admin/includes/upgrade.php');
         dbDelta($sql);
     }
 }
 
-public function get_ranking($dataset, $rows)
+public function shortcode($p)
+{
+    $query_set = $this->get_query_set();
+    if (!isset($p['period']) || !isset($query_set[$p['period']])) {
+        $p['period'] = apply_filters('wp_ranking_default_period', '30days');
+    }
+    if (!isset($p['rows']) || !intval($p['rows'])) {
+        $p['rows'] = apply_filters('wp_ranking_default_rows', 5);
+    }
+    return $this->get_ranking($p['period'], $p['rows']);
+}
+
+public function get_ranking($query_set, $rows = 5)
+{
+    $posts = $this->get_ranking_data($query_set, $rows);
+    $key = sprintf('wp_ranking_%s_%d', $query_set, $rows);
+    if ($html = get_transient($key)) {
+        return $html;
+    } else {
+        $list = array();
+        $html = '<li class="post-%d"><a href="%s">%s</a></li>';
+        foreach ($posts as $p) {
+            $list[] = sprintf(
+                $html,
+                $p['post_id'],
+                get_permalink($p['post_id']),
+                get_the_title($p['post_id'])
+            );
+        }
+        $html = sprintf(
+            '<ol class="wp_ranking %s">%s</ol>',
+            'wp_ranking_'.esc_attr($query_set),
+            join('', $list)
+        );
+        set_transient(
+            $key,
+            $html,
+            apply_filters('wp_ranking_cache_expire', $this->cache_expire)
+        );
+        return $html;
+    }
+}
+
+public function get_ranking_data($query_set, $rows = 5)
 {
     global $wpdb;
     global $blog_id;
 
-    $default_dataset = $this->get_dataset();
-    $query = $default_dataset[$dataset];
+    $q = $this->get_query_set();
+    if (isset($q[$query_set]) && $q[$query_set]) {
+        $query = $q[$query_set];
+    } else {
+        return new WP_Error(__LINE__, 'Unknown query set');
+    }
 
     $sql = "select `post_id`, count(*) from `{$this->table}`";
     $sql .= " where `blog_id`=%d and `datetime` between %d and %d";
@@ -154,42 +205,41 @@ public function get_ranking($dataset, $rows)
         $query['end'],
         $rows
     );
-    $key = 'wp-ranking-'.$dataset.'-'.$rows;
-    $data = get_transient($key);
-    if (!$data) {
-        $data = $wpdb->query($sql, ARRAY_A);
-        set_transient($key, $data, $this->query_expire);
-    }
 
-    return $data;
+    return $wpdb->get_results($sql, ARRAY_A);
 }
 
-private function get_dataset()
+private function get_query_set()
 {
-    $this->dataset = array(
-        array(
-            'title' => __('Last 7 days', 'wp-ranking'),
+    $this->query_set = array(
+        'yesterday' => array(
+            'title' => __('Yesterday', 'wp_ranking'),
+            'start' => strtotime(date('Y-m-d', strtotime('last day'))),
+            'end'   => strtotime(date('Y-m-d', time()))
+        ),
+        '7days' => array(
+            'title' => __('Last 7 days', 'wp_ranking'),
             'start' => time()-60*60*24*7,
             'end'   => time()
         ),
-        array(
-            'title' => __('Last 30 days', 'wp-ranking'),
+        '30days' => array(
+            'title' => __('Last 30 days', 'wp_ranking'),
             'start' => time()-60*60*24*30,
             'end'   => time()
         ),
-        array(
-            'title' => __('Last week', 'wp-ranking'),
+        'weekly' => array(
+            'title' => __('Last week', 'wp_ranking'),
             'start' => strtotime("sunday previous week")-60*60*24*7,
             'end'   => strtotime("sunday previous week")
         ),
-        array(
-            'title' => __('Last month', 'wp-ranking'),
+        'monthly' => array(
+            'title' => __('Last month', 'wp_ranking'),
             'start' => strtotime("first day of previous month"),
             'end'   => strtotime(date('Y-m-d', strtotime("first day of this month")))
         ),
     );
 
-    return apply_filters('wp-ranking-dataset', $this->dataset);
+    return apply_filters('wp_ranking_query_set', $this->query_set);
 }
 
 } // end WPRanking()

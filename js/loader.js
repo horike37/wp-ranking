@@ -1,6 +1,1 @@
-window.onload = function(){
-setTimeout(function(){
-    var uri = '%s';
-    jQuery.getJSON(uri, function(){});
-}, %d);
-}
+window.onload=function(){setTimeout(function(){var a="%s";jQuery.getJSON(a,function(){return true})},%d)};
