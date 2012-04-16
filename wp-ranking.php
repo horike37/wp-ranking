@@ -17,13 +17,14 @@ $wpranking = new WPRanking();
 class WPRanking {
 
 private $query_expire = 3600; // seconds
-private $count_timer = 4000; // msec
+private $count_timer  = 4000; // msec
 private $counter;
-private $table = 'ranking_table';
-private $nonce = 'wp-ranking';
-private $action = 'wp-ranking-counter';
-private $loader = 'wp-ranking-loader';
-private $cookie = 'wp-ranking';
+private $table   = 'ranking_table';
+private $nonce   = 'wp-ranking';
+private $action  = 'wp-ranking-counter';
+private $loader  = 'wp-ranking-loader';
+private $cookie  = 'wp-ranking';
+private $dataset = array();
 
 function __construct()
 {
@@ -133,24 +134,27 @@ public function activation()
     }
 }
 
-public function get_ranking($start, $end, $rows)
+public function get_ranking($dataset, $rows)
 {
     global $wpdb;
     global $blog_id;
 
+    $default_dataset = $this->get_dataset();
+    $query = $default_dataset[$dataset];
+
     $sql = "select `post_id`, count(*) from `{$this->table}`";
-    $sql .= " where `blog_id`=%d and `datetime`>%d and `datetime`<%d";
+    $sql .= " where `blog_id`=%d and `datetime` between %d and %d";
     $sql .= " group by `post_id`";
     $sql .= " order by count(*) desc";
     $sql .= " limit 0,%d";
     $sql = $wpdb->prepare(
         $sql,
         $blog_id,
-        $start,
-        $end,
+        $query['start'],
+        $query['end'],
         $rows
     );
-    $key = md5($sql);
+    $key = 'wp-ranking-'.$dataset.'-'.$rows;
     $data = get_transient($key);
     if (!$data) {
         $data = $wpdb->query($sql, ARRAY_A);
@@ -158,6 +162,34 @@ public function get_ranking($start, $end, $rows)
     }
 
     return $data;
+}
+
+private function get_dataset()
+{
+    $this->dataset = array(
+        array(
+            'title' => __('Last 7 days', 'wp-ranking'),
+            'start' => time()-60*60*24*7,
+            'end'   => time()
+        ),
+        array(
+            'title' => __('Last 30 days', 'wp-ranking'),
+            'start' => time()-60*60*24*30,
+            'end'   => time()
+        ),
+        array(
+            'title' => __('Last week', 'wp-ranking'),
+            'start' => strtotime("sunday previous week")-60*60*24*7,
+            'end'   => strtotime("sunday previous week")
+        ),
+        array(
+            'title' => __('Last month', 'wp-ranking'),
+            'start' => strtotime("first day of previous month"),
+            'end'   => strtotime(date('Y-m-d', strtotime("first day of this month")))
+        ),
+    );
+
+    return apply_filters('wp-ranking-dataset', $this->dataset);
 }
 
 } // end WPRanking()
