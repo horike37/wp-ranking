@@ -30,7 +30,7 @@ public function get_ranking($query_set, $rows = 5)
     global $wpranking;
     $posts = $wpranking->get_ranking_data($query_set, $rows);
     $key = sprintf('wp_ranking_%s_%d', $query_set, $rows);
-    if ($html = get_transient($key)) {
+    if ($html = get_transient($key) && !is_user_logged_in()) {
         return $html;
     } else {
         $list = array();
