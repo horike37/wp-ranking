@@ -17,7 +17,7 @@ public function shortcode($p)
     global $wpranking;
     $query_set = $wpranking->get_query_set();
     if (!isset($p['period']) || !isset($query_set[$p['period']])) {
-        $p['period'] = apply_filters('wp_ranking_default_period', '30days');
+        $p['period'] = apply_filters('wp_ranking_default_period', '7days');
     }
     if (!isset($p['rows']) || !intval($p['rows'])) {
         $p['rows'] = apply_filters('wp_ranking_default_rows', 5);
@@ -30,7 +30,7 @@ public function get_ranking($query_set, $rows = 5)
     global $wpranking;
     $posts = $wpranking->get_ranking_data($query_set, $rows);
     $key = sprintf('wp_ranking_%s_%d', $query_set, $rows);
-    if ($html = get_transient($key) && !is_user_logged_in()) {
+    if (!is_user_logged_in() && ($html = get_transient($key))) {
         return $html;
     } else {
         $list = array();
@@ -48,10 +48,11 @@ public function get_ranking($query_set, $rows = 5)
             'wp_ranking_'.esc_attr($query_set),
             join('', $list)
         );
+        delete_transient($key);
         set_transient(
             $key,
             $html,
-            apply_filters('wp_ranking_cache_expire', $this->cache_expire)
+            intval(apply_filters('wp_ranking_cache_expire', $this->cache_expire))
         );
         return $html;
     }

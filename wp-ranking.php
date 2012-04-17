@@ -19,7 +19,7 @@ class WPRanking {
 
 private $count_timer  = 4000; // msec
 private $counter;
-private $table   = 'ranking_table';
+private $table   = 'daily_ranking';
 private $nonce   = 'wp_ranking';
 private $action  = 'wp_ranking_counter';
 private $loader  = 'wp_ranking_loader';
@@ -72,13 +72,14 @@ public function counter()
                     isset($_GET['post_id']) && intval($_GET['post_id'])) {
             if (isset($_COOKIE[$this->cookie]) && $_COOKIE[$this->cookie]) {
                 global $wpdb;
-                $sql = "REPLACE INTO `{$this->table}` VALUES(%d, %d, %s, %d)";
+                $sql = "INSERT INTO `{$this->table}` VALUES(%s, %d, %d, %d)";
+                $sql .= " ON DUPLICATE KEY UPDATE `counter`=`counter`+1";
                 $sql = $wpdb->prepare(
                     $sql,
+                    date_i18n('Y-m-d'),
                     $_GET['blog_id'],
                     $_GET['post_id'],
-                    $_COOKIE[$this->cookie],
-                    time()
+                    1
                 );
                 $wpdb->query($sql);
                 echo json_encode(array('status' => true));
@@ -124,14 +125,14 @@ public function activation()
 {
     global $wpdb;
     if ($wpdb->get_var("show tables like '$this->table'") != $this->table) {
+        $sql = "DROP TABLE IF EXISTS `{$wpdb->base_prefix}ranking_table`";
+        $wpdb->query($sql);
         $sql = "CREATE TABLE `{$this->table}` (
+            `date` date not null,
             `blog_id` bigint(20) unsigned not null,
             `post_id` bigint(20) unsigned not null,
-            `session` varchar(32) not null,
-            `datetime` bigint(20) not null,
-            primary key (`blog_id`, `post_id`, `session`),
-            key `session` (`session`),
-            key `datetime`(`datetime`)
+            `counter` bigint(20) not null,
+            primary key (`date`, `blog_id`, `post_id`)
             );";
         require_once(ABSPATH.'wp-admin/includes/upgrade.php');
         dbDelta($sql);
@@ -151,10 +152,10 @@ public function get_ranking_data($query_set, $rows = 5)
         return new WP_Error(__LINE__, 'Unknown query set');
     }
 
-    $sql = "select `post_id`, count(*) from `{$this->table}`";
-    $sql .= " where `blog_id`=%d and `datetime` between %d and %d";
+    $sql = "select post_id,sum(`counter`) as `count` from `{$this->table}`";
+    $sql .= " where `blog_id`=%d and `date` between %s and %s";
     $sql .= " group by `post_id`";
-    $sql .= " order by count(*) desc";
+    $sql .= " order by sum(`counter`) desc";
     $sql .= " limit 0,%d";
     $sql = $wpdb->prepare(
         $sql,
@@ -163,7 +164,6 @@ public function get_ranking_data($query_set, $rows = 5)
         $query['end'],
         $rows
     );
-
     return $wpdb->get_results($sql, ARRAY_A);
 }
 
@@ -172,28 +172,18 @@ public function get_query_set()
     $this->query_set = array(
         'yesterday' => array(
             'title' => __('Yesterday', 'wp_ranking'),
-            'start' => strtotime(date('Y-m-d', strtotime('last day'))),
-            'end'   => strtotime(date('Y-m-d', time()))
+            'start' => date_i18n('Y-m-d', strtotime('last day')),
+            'end' => date_i18n('Y-m-d', strtotime('last day'))
         ),
         '7days' => array(
             'title' => __('Last 7 days', 'wp_ranking'),
-            'start' => time()-60*60*24*7,
-            'end'   => time()
+            'start' => date_i18n('Y-m-d', time()-60*60*24*7),
+            'end' => date_i18n('Y-m-d', time())
         ),
         '30days' => array(
             'title' => __('Last 30 days', 'wp_ranking'),
-            'start' => time()-60*60*24*30,
-            'end'   => time()
-        ),
-        'weekly' => array(
-            'title' => __('Last week', 'wp_ranking'),
-            'start' => strtotime("sunday previous week")-60*60*24*7,
-            'end'   => strtotime("sunday previous week")
-        ),
-        'monthly' => array(
-            'title' => __('Last month', 'wp_ranking'),
-            'start' => strtotime("first day of previous month"),
-            'end'   => strtotime(date('Y-m-d', strtotime("first day of this month")))
+            'start' => date_i18n('Y-m-d', time()-60*60*24*30),
+            'end' => date_i18n('Y-m-d', time())
         ),
     );
 
