@@ -12,8 +12,31 @@ Text Domain: wp_ranking
 
 require_once(dirname(__FILE__).'/includes/admin.class.php');
 require_once(dirname(__FILE__).'/includes/shortcode.class.php');
+require_once(dirname(__FILE__).'/includes/class-addrewriterules.php');
 
 $wpranking = new WPRanking();
+
+register_activation_hook(__FILE__, 'flush_rewrite_rules');
+
+new WP_AddRewriteRules(
+    'ajax$',
+    'ajax',
+    'ajax_callback_function'
+);
+
+function ajax_callback_function()
+{	
+	global $wpranking;
+	if ( isset( $_GET['action'] ) ) {
+		if(  $_GET['action'] == $wpranking->get_loader() ) {
+			$wpranking->loader();
+		} elseif( $_GET['action'] == $wpranking->get_action() ) {
+			$wpranking->counter();
+		}
+	}
+	header('HTTP', true, 403);
+	exit;
+}
 
 class WPRanking {
 
@@ -38,6 +61,16 @@ function __construct()
     add_shortcode('wp_ranking' , array(&$this, 'shortcode'));
 }
 
+public function get_action()
+{
+	return $this->action;
+}
+
+public function get_loader()
+{
+	return $this->loader;
+}
+
 public function wp_head()
 {
     if (!is_user_logged_in()) {
@@ -51,12 +84,12 @@ public function wp_footer()
         return;
     }
     global $blog_id;
-    $src = admin_url(sprintf(
-        'admin-ajax.php?action=%s&blog_id=%d&post_id=%s',
+    $src = sprintf(
+        'http://'.$_SERVER['HTTP_HOST'].'/ajax/?action=%s&blog_id=%d&post_id=%s',
         $this->loader,
         $blog_id,
         get_the_ID()
-    ));
+    );
     printf(
         '<script type="text/javascript" src="%s"></script>',
         $src
@@ -66,6 +99,7 @@ public function wp_footer()
 public function counter()
 {
     nocache_headers();
+
     header('Content-Type: application/json; charset=utf-8');
     if (wp_verify_nonce($_GET['nonce'], $this->nonce) && !is_user_logged_in()) {
         if (isset($_GET['blog_id']) && intval($_GET['blog_id']) &&
@@ -104,7 +138,8 @@ public function loader()
                 time()+60*60*24
             );
         }
-        $src = admin_url('admin-ajax.php');
+
+        $src = 'http://'.$_SERVER['HTTP_HOST'].'/ajax/';
         $src = add_query_arg('blog_id', intval($_GET['blog_id']), $src);
         $src = add_query_arg('post_id', intval($_GET['post_id']), $src);
         $src = add_query_arg('action', $this->action, $src);
